@@ -1,0 +1,29 @@
+{
+  "name": "tagebuch-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "copy-wasm": "cp node_modules/sql.js/dist/sql-wasm.wasm public/sql-wasm.wasm",
+    "dev": "npm run copy-wasm && vite",
+    "build": "npm run copy-wasm && tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "@types/leaflet": "^1.9.21",
+    "crypto-js": "^4.2.0",
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.8"
+  }
+}
