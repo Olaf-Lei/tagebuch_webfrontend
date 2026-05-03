@@ -27,6 +27,8 @@ export default function App() {
   const [driveLastSync, setDriveLastSync] = useState<Date | null>(null)
   const [ncError, setNcError] = useState('')
   const [driveError, setDriveError] = useState('')
+  const [pushing, setPushing] = useState(false)
+  const [pushError, setPushError] = useState('')
   const [showSyncSettings, setShowSyncSettings] = useState(false)
   const [isDark, setIsDark] = useState<boolean>(() =>
     localStorage.getItem('tagebuch_theme') !== 'light'
@@ -181,6 +183,20 @@ export default function App() {
     ])
   }
 
+  async function pushLocalToRemote() {
+    if (pushing) return
+    setPushError(''); setPushing(true)
+    try {
+      await _uploadDb()
+      if (config) setNcLastSync(new Date())
+      if (driveIsConnected()) setDriveLastSync(new Date())
+    } catch (e) {
+      setPushError(String(e))
+    } finally {
+      setPushing(false)
+    }
+  }
+
   async function handleSave(
     entryId: number | null, text: string, timestamp: number,
     categoryIds: number[], tagNames: string[], qualifierValues: Record<number, number>
@@ -268,6 +284,9 @@ export default function App() {
         onSyncNC={syncNC}
         onSyncDrive={syncDriveOnly}
         onSyncAll={syncAll}
+        pushing={pushing}
+        pushError={pushError}
+        onPushLocal={pushLocalToRemote}
       />
       {showSyncSettings && (
         <SyncSettings

@@ -12,13 +12,13 @@ const EMOJI_PRESETS: Record<string, string[]> = {
 }
 
 function toDatetimeLocal(ts: number): string {
-  const d = new Date(ts * 1000)
+  const d = new Date(ts)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 function fromDatetimeLocal(s: string): number {
-  return Math.floor(new Date(s).getTime() / 1000)
+  return new Date(s).getTime()
 }
 
 interface Props {
@@ -34,7 +34,7 @@ interface Props {
 
 export default function EntryForm({ entry, categories, tags, qualifiers, saving, onSave, onDelete, onCancel }: Props) {
   const [text, setText] = useState(entry?.text ?? '')
-  const [timestampStr, setTimestampStr] = useState(toDatetimeLocal(entry?.timestamp ?? Math.floor(Date.now() / 1000)))
+  const [timestampStr, setTimestampStr] = useState(toDatetimeLocal(entry?.timestamp ?? Date.now()))
   const [selectedCats, setSelectedCats] = useState<number[]>(entry?.categories.map(c => c.id) ?? [])
   const [tagInput, setTagInput] = useState(entry?.tags.map(t => t.name).join(', ') ?? '')
   const [qualValues, setQualValues] = useState<Record<number, number>>(entry?.qualifierValues ?? {})

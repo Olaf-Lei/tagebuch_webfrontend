@@ -19,8 +19,8 @@ const QUAL_COLORS = ['#C9A84C','#5B9CF6','#7EC97E','#E07E7E','#B57EE0','#7EC9C9'
 type Period = 'week' | 'month' | 'year' | 'all'
 
 function periodRange(p: Period): { from: number; to: number } {
-  const now = Math.floor(Date.now() / 1000)
-  const day = 86400
+  const now = Date.now()
+  const day = 86400_000
   if (p === 'week')  return { from: now - 7 * day, to: now }
   if (p === 'month') return { from: now - 30 * day, to: now }
   if (p === 'year')  return { from: now - 365 * day, to: now }
@@ -28,7 +28,11 @@ function periodRange(p: Period): { from: number; to: number } {
 }
 
 function LinePath({ points, color }: { points: { x: number; y: number }[]; color: string }) {
-  if (points.length < 2) return null
+  if (points.length === 0) return null
+  if (points.length === 1) {
+    const p = points[0]
+    return <line x1={p.x - 6} y1={p.y} x2={p.x + 6} y2={p.y} stroke={color} strokeWidth={2} strokeLinecap="round" />
+  }
   const d = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
   return <path d={d} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" />
 }

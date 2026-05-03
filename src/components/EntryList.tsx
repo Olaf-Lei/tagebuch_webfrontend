@@ -33,6 +33,9 @@ interface Props {
   onSyncNC: () => void
   onSyncDrive: () => void
   onSyncAll: () => void
+  pushing: boolean
+  pushError: string
+  onPushLocal: () => void
 }
 
 type Tab = 'entries' | 'stats' | 'map'
@@ -52,7 +55,7 @@ function fmtTime(d: Date | null): string {
   return d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
 }
 
-export default function EntryList({ categories, tags, qualifiers, onSave, onDelete, onLogout, onOpenSyncSettings, saving, isDark, onToggleTheme, ncConnected, ncLastSync, ncSyncing, ncError, driveConnected, driveLastSync, driveSyncing, driveError, onSyncNC, onSyncDrive, onSyncAll }: Props) {
+export default function EntryList({ categories, tags, qualifiers, onSave, onDelete, onLogout, onOpenSyncSettings, saving, isDark, onToggleTheme, ncConnected, ncLastSync, ncSyncing, ncError, driveConnected, driveLastSync, driveSyncing, driveError, onSyncNC, onSyncDrive, onSyncAll, pushing, pushError, onPushLocal }: Props) {
   const [tab, setTab] = useState<Tab>('entries')
   const [search, setSearch] = useState('')
   const [filterCats, setFilterCats] = useState<number[]>([])
@@ -204,6 +207,21 @@ export default function EntryList({ categories, tags, qualifiers, onSave, onDele
               >
                 Alle synchronisieren
               </button>
+            )}
+            {(ncConnected || driveConnected) && (
+              <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
+                  Remote-DB ist defekt oder veraltet?
+                </div>
+                <button
+                  style={{ ...sm.syncBtn, opacity: pushing ? 0.6 : 1, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)' }}
+                  onClick={onPushLocal}
+                  disabled={pushing || ncSyncing || driveSyncing}
+                >
+                  {pushing ? '⟳ Hochladen…' : '⬆ Lokale DB hochladen'}
+                </button>
+                {pushError && <div style={sm.error}>Fehler: {pushError}</div>}
+              </div>
             )}
             <button style={sm.closeBtn} onClick={() => setSyncOpen(false)}>Schließen</button>
           </div>

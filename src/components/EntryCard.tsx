@@ -14,7 +14,7 @@ function emojiForPreset(preset: string, value: number): string {
 }
 
 function formatDate(ts: number): string {
-  return new Date(ts * 1000).toLocaleString('de-DE', {
+  return new Date(ts).toLocaleString('de-DE', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })

@@ -6,8 +6,8 @@ import { getEntriesWithLocation } from '../db/database'
 type Period = 'week' | 'month' | 'year' | 'all'
 
 function periodRange(p: Period) {
-  const now = Math.floor(Date.now() / 1000)
-  const day = 86400
+  const now = Date.now()
+  const day = 86400_000
   if (p === 'week')  return { from: now - 7 * day, to: now }
   if (p === 'month') return { from: now - 30 * day, to: now }
   if (p === 'year')  return { from: now - 365 * day, to: now }
@@ -50,7 +50,7 @@ export default function MapView({ onOpenEntry }: { onOpenEntry: (id: number) => 
       const lat = entry.latitude, lon = entry.longitude
       bounds.push([lat, lon])
 
-      const date = new Date(entry.timestamp * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      const date = new Date(entry.timestamp).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
       const preview = entry.text.length > 100 ? entry.text.slice(0, 100) + '…' : entry.text
       const loc = entry.location_name ? `<br><small style="color:#8A9BB0">📍 ${entry.location_name}</small>` : ''
 

@@ -231,6 +231,129 @@ export function deleteEntry(id: number) {
   getDb().run(`DELETE FROM entries WHERE id = ?`, [id])
 }
 
+function formatDateDE(ts: number): string {
+  return new Date(ts).toLocaleString('de-DE', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+}
+
+function triggerDownload(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+interface ExportRow {
+  id: number
+  timestamp: number
+  created_at: number
+  text: string
+  categories: string[]
+  tags: string[]
+  latitude: number | null
+  longitude: number | null
+  location_name: string | null
+  qualifiers: { name: string; value: number }[]
+}
+
+function getAllEntriesForExport(): ExportRow[] {
+  const d = getDb()
+
+  const stmt = d.prepare(`
+    SELECT e.id, e.timestamp, e.text, e.created_at,
+           e.latitude, e.longitude, e.location_name,
+           GROUP_CONCAT(DISTINCT c.name) as cats,
+           GROUP_CONCAT(DISTINCT t.name) as tags_
+    FROM entries e
+    LEFT JOIN entry_categories ec ON ec.entry_id = e.id
+    LEFT JOIN categories c ON c.id = ec.category_id
+    LEFT JOIN entry_tags et ON et.entry_id = e.id
+    LEFT JOIN tags t ON t.id = et.tag_id
+    GROUP BY e.id
+    ORDER BY e.timestamp DESC`)
+  const rows: ExportRow[] = []
+  while (stmt.step()) {
+    const r = stmt.getAsObject() as Record<string, unknown>
+    rows.push({
+      id: r.id as number,
+      timestamp: r.timestamp as number,
+      text: r.text as string,
+      created_at: r.created_at as number,
+      latitude: (r.latitude as number) ?? null,
+      longitude: (r.longitude as number) ?? null,
+      location_name: (r.location_name as string) ?? null,
+      categories: r.cats ? (r.cats as string).split(',') : [],
+      tags: r.tags_ ? (r.tags_ as string).split(',') : [],
+      qualifiers: [],
+    })
+  }
+  stmt.free()
+
+  const qStmt = d.prepare(`
+    SELECT eq.entry_id, q.name, eq.value
+    FROM entry_qualifiers eq
+    JOIN qualifiers q ON q.id = eq.qualifier_id`)
+  while (qStmt.step()) {
+    const r = qStmt.getAsObject() as Record<string, unknown>
+    const row = rows.find(e => e.id === (r.entry_id as number))
+    if (row) row.qualifiers.push({ name: r.name as string, value: r.value as number })
+  }
+  qStmt.free()
+
+  return rows
+}
+
+export function exportJSON() {
+  const rows = getAllEntriesForExport()
+  const data = rows.map(e => ({
+    id: e.id,
+    timestamp: e.timestamp,
+    timestamp_readable: formatDateDE(e.timestamp),
+    text: e.text,
+    categories: e.categories,
+    tags: e.tags,
+    qualifiers: Object.fromEntries(e.qualifiers.map(q => [q.name, q.value])),
+    latitude: e.latitude,
+    longitude: e.longitude,
+    location_name: e.location_name,
+    created_at: e.created_at,
+  }))
+  triggerDownload(JSON.stringify(data, null, 2), 'tagebuch_export.json', 'application/json')
+}
+
+export function exportCSV() {
+  const rows = getAllEntriesForExport()
+  const allQualifierNames = [...new Set(rows.flatMap(e => e.qualifiers.map(q => q.name)))]
+  const header = ['ID', 'Datum', 'Text', 'Kategorien', 'Tags', ...allQualifierNames, 'Breitengrad', 'Längengrad', 'Ort'].join(';')
+  const lines = rows.map(e => {
+    const text = `"${e.text.replace(/"/g, '""')}"`
+    const qCols = allQualifierNames.map(name => e.qualifiers.find(q => q.name === name)?.value ?? '')
+    return [e.id, formatDateDE(e.timestamp), text, e.categories.join('|'), e.tags.join('|'), ...qCols, e.latitude ?? '', e.longitude ?? '', e.location_name ?? ''].join(';')
+  })
+  triggerDownload([header, ...lines].join('\n'), 'tagebuch_export.csv', 'text/csv;charset=utf-8')
+}
+
+export function exportMarkdown() {
+  const rows = getAllEntriesForExport()
+  const lines: string[] = ['# Tagebuch-Export\n']
+  for (const e of rows) {
+    lines.push(`## ${formatDateDE(e.timestamp)}`)
+    lines.push('')
+    lines.push(e.text)
+    if (e.categories.length) lines.push(`\n**Kategorien:** ${e.categories.join(', ')}`)
+    if (e.tags.length) lines.push(`**Tags:** ${e.tags.map(t => `#${t}`).join(' ')}`)
+    if (e.qualifiers.length) lines.push(`**Bewertungen:** ${e.qualifiers.map(q => `${q.name}: ${q.value}`).join(', ')}`)
+    if (e.location_name || e.latitude) lines.push(`**Ort:** ${e.location_name ?? `${e.latitude}, ${e.longitude}`}`)
+    lines.push('\n---\n')
+  }
+  triggerDownload(lines.join('\n'), 'tagebuch_export.md', 'text/markdown;charset=utf-8')
+}
+
 export interface StatsPeriod { from: number; to: number }
 
 export function getStatsOverview(p: StatsPeriod) {
@@ -309,7 +432,7 @@ export interface QualifierTrendPoint {
 export function getQualifierTrend(p: StatsPeriod): QualifierTrendPoint[] {
   const d = getDb()
   const stmt = d.prepare(`
-    SELECT date(e.timestamp, 'unixepoch') as day,
+    SELECT date(e.timestamp / 1000, 'unixepoch') as day,
            q.id as qualifierId,
            q.name as qualifierName,
            COALESCE(q.emoji_preset, 'mood') as emojiPreset,

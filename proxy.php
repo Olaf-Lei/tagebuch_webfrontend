@@ -1,10 +1,40 @@
 <?php
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, PUT, OPTIONS');
+header('Access-Control-Allow-Methods: GET, PUT, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-Webdav-Target, X-Webdav-User, X-Webdav-Pass');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
+    exit;
+}
+
+$action = $_GET['action'] ?? '';
+if ($action === 'google_token' || $action === 'google_refresh') {
+    header('Content-Type: application/json');
+    $clientId     = 'YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com';
+    $clientSecret = 'YOUR_GOOGLE_CLIENT_SECRET';
+    $input        = json_decode(file_get_contents('php://input'), true) ?? [];
+    $params = $action === 'google_token'
+        ? ['code'          => $input['code']          ?? '',
+           'client_id'     => $clientId,
+           'client_secret' => $clientSecret,
+           'redirect_uri'  => $input['redirect_uri']  ?? '',
+           'grant_type'    => 'authorization_code',
+           'code_verifier' => $input['code_verifier'] ?? '']
+        : ['refresh_token' => $input['refresh_token'] ?? '',
+           'client_id'     => $clientId,
+           'client_secret' => $clientSecret,
+           'grant_type'    => 'refresh_token'];
+    $ch = curl_init('https://oauth2.googleapis.com/token');
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    http_response_code($httpCode);
+    echo $response;
     exit;
 }
 
