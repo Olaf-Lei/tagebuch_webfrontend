@@ -33,8 +33,15 @@ interface QRPayload {
   encKey?: string
 }
 
+type View = 'main' | 'manual'
+
 export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, driveEmail, error }: Props) {
   const saved = loadSavedConfig()
+  const [view, setView] = useState<View>('main')
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState('')
+
+  // Manual form state
   const [showFull, setShowFull] = useState(!saved?.davUser)
   const [url, setUrl] = useState(saved?.url ?? '')
   const [username, setUsername] = useState(saved?.username ?? '')
@@ -43,8 +50,7 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
   const [dir, setDir] = useState(saved?.dir ?? '/Tagebuch')
   const [encKey, setEncKey] = useState(saved?.encKey ?? '')
   const [driveEncKey, setDriveEncKey] = useState(localStorage.getItem('gdrive_enc_key') ?? '')
-  const [scanning, setScanning] = useState(false)
-  const [scanError, setScanError] = useState('')
+
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -90,28 +96,34 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
       try {
         const payload: QRPayload = JSON.parse(result.data)
         if (payload.v === 1) {
-          if (payload.nc) {
-            setUrl(payload.nc.url)
-            setUsername(payload.nc.user)
-            setDavUser('')
-            setPassword(payload.nc.pass)
-            setDir(payload.nc.path)
-            setShowFull(true)
-          }
+          stopScan()
           if (payload.encKey) {
-            setEncKey(payload.encKey)
-            setDriveEncKey(payload.encKey)
             localStorage.setItem('gdrive_enc_key', payload.encKey)
           }
-          stopScan()
+          if (payload.nc) {
+            const config: WebDAVConfig = {
+              url: payload.nc.url,
+              username: payload.nc.user,
+              davUser: '',
+              password: payload.nc.pass,
+              dir: payload.nc.path,
+              encKey: payload.encKey?.trim().toLowerCase() || undefined,
+            }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+            onConnect(config)
+            return
+          }
+          if (payload.encKey && driveEmail) {
+            onConnectDrive(payload.encKey)
+            return
+          }
+          setScanError('QR-Code erkannt — keine Verbindungsdaten gefunden.')
           return
         }
       } catch { /* kein gültiger Payload */ }
     }
     rafRef.current = requestAnimationFrame(tick)
   }
-
-  function handleQuickConnect() { onConnect(saved!) }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -138,6 +150,7 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
   return (
     <div style={s.container}>
+      {/* Kamera-Overlay */}
       {scanning && (
         <div style={s.scanOverlay}>
           <div style={s.scanVideoWrap}>
@@ -150,62 +163,83 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
           <button style={s.scanClose} onClick={stopScan}>✕ Abbrechen</button>
         </div>
       )}
+
       <div style={s.card}>
         <h1 style={s.title}>📔 Tagebuch</h1>
-        <button style={s.qrBtn} onClick={startScan}>📷 Mit QR-Code anmelden</button>
 
-        {/* Google Drive */}
-        {driveEmail ? (
-          <div style={s.driveSection}>
-            <div style={s.driveStatus}>
-              <span style={{ fontSize: 20 }}>🔵</span>
-              <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1 }}>{driveEmail}</span>
-            </div>
-            <label style={s.label}>AES-Key (nur bei Verschlüsselung)</label>
-            <input style={s.input} type="text" value={driveEncKey} onChange={e => setDriveEncKey(e.target.value)}
-              placeholder="64-stelliger Hex-String" autoComplete="off" />
-            {error && <p style={s.error}>{error}</p>}
-            <button style={s.driveBtn} onClick={handleDriveConnect}>Mit Google Drive verbinden</button>
-            <button style={s.linkBtn} onClick={onGoogleAuth}>Anderes Konto verwenden</button>
-          </div>
-        ) : (
-          <button style={s.driveBtn} onClick={onGoogleAuth}>Mit Google Drive anmelden</button>
-        )}
-
-        <div style={s.divider}><span style={s.dividerLabel}>oder Nextcloud</span></div>
-
-        {/* Nextcloud */}
-        {saved?.davUser && !showFull ? (
+        {view === 'main' ? (
+          /* ── Haupt-Ansicht: QR-Code ── */
           <>
-            <p style={s.savedInfo}>{saved.username} · {saved.url.replace(/https?:\/\//, '')}</p>
-            {!driveEmail && error && <p style={s.error}>{error}</p>}
-            <button style={s.button} onClick={handleQuickConnect}>Mit Nextcloud verbinden</button>
-            <button style={s.linkBtn} onClick={() => setShowFull(true)}>Andere Zugangsdaten</button>
+            <button style={s.qrBtnLarge} onClick={startScan}>
+              <span style={{ fontSize: 40, lineHeight: 1 }}>📷</span>
+              <span style={{ fontSize: 16, fontWeight: 700 }}>Mit QR-Code anmelden</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 400 }}>QR-Code aus der App scannen</span>
+            </button>
+            {scanError && <p style={s.error}>{scanError}</p>}
+            {error && <p style={s.error}>{error}</p>}
+            <button style={s.linkBtn} onClick={() => setView('manual')}>Manueller Login →</button>
           </>
         ) : (
-          <form onSubmit={handleSubmit} style={s.form}>
-            <label style={s.label}>Nextcloud-URL</label>
-            <input style={s.input} type="url" value={url} onChange={e => setUrl(e.target.value)}
-              placeholder="https://cloud.example.com" required />
-            <label style={s.label}>Benutzername (Login)</label>
-            <input style={s.input} type="text" value={username} onChange={e => setUsername(e.target.value)}
-              placeholder="olaf@example.com" required />
-            <label style={s.label}>Kontoname (Nextcloud → Profil)</label>
-            <input style={s.input} type="text" value={davUser} onChange={e => setDavUser(e.target.value)}
-              placeholder="olaf  (leer = gleich wie Benutzername)" />
-            <label style={s.label}>Passwort</label>
-            <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••" required />
-            <label style={s.label}>Verzeichnis</label>
-            <input style={s.input} type="text" value={dir} onChange={e => setDir(e.target.value)}
-              placeholder="/Eigene/Persönlich" required />
-            <label style={s.label}>AES-Key (nur bei Verschlüsselung)</label>
-            <input style={s.input} type="text" value={encKey} onChange={e => setEncKey(e.target.value)}
-              placeholder="64-stelliger Hex-String" autoComplete="off" />
-            {!driveEmail && error && <p style={s.error}>{error}</p>}
-            <button type="submit" style={s.button}>Verbinden</button>
-            {saved?.davUser && <button type="button" style={s.linkBtn} onClick={() => setShowFull(false)}>Zurück</button>}
-          </form>
+          /* ── Manueller Login ── */
+          <>
+            <button style={{ ...s.linkBtn, marginBottom: 20, textAlign: 'left' as const }} onClick={() => setView('main')}>
+              ← Zurück
+            </button>
+
+            {/* Google Drive */}
+            {driveEmail ? (
+              <div style={s.driveSection}>
+                <div style={s.driveStatus}>
+                  <span style={{ fontSize: 20 }}>🔵</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text)', flex: 1 }}>{driveEmail}</span>
+                </div>
+                <label style={s.label}>AES-Key (nur bei Verschlüsselung)</label>
+                <input style={s.input} type="text" value={driveEncKey} onChange={e => setDriveEncKey(e.target.value)}
+                  placeholder="64-stelliger Hex-String" autoComplete="off" />
+                {error && <p style={s.error}>{error}</p>}
+                <button style={s.driveBtn} onClick={handleDriveConnect}>Mit Google Drive verbinden</button>
+                <button style={s.linkBtn} onClick={onGoogleAuth}>Anderes Konto verwenden</button>
+              </div>
+            ) : (
+              <button style={s.driveBtn} onClick={onGoogleAuth}>Mit Google Drive anmelden</button>
+            )}
+
+            <div style={s.divider}><span style={s.dividerLabel}>oder Nextcloud</span></div>
+
+            {/* Nextcloud */}
+            {saved?.davUser && !showFull ? (
+              <>
+                <p style={s.savedInfo}>{saved.username} · {saved.url.replace(/https?:\/\//, '')}</p>
+                {!driveEmail && error && <p style={s.error}>{error}</p>}
+                <button style={s.button} onClick={() => onConnect(saved!)}>Mit Nextcloud verbinden</button>
+                <button style={s.linkBtn} onClick={() => setShowFull(true)}>Andere Zugangsdaten</button>
+              </>
+            ) : (
+              <form onSubmit={handleSubmit} style={s.form}>
+                <label style={s.label}>Nextcloud-URL</label>
+                <input style={s.input} type="url" value={url} onChange={e => setUrl(e.target.value)}
+                  placeholder="https://cloud.example.com" required />
+                <label style={s.label}>Benutzername (Login)</label>
+                <input style={s.input} type="text" value={username} onChange={e => setUsername(e.target.value)}
+                  placeholder="olaf@example.com" required />
+                <label style={s.label}>Kontoname (Nextcloud → Profil)</label>
+                <input style={s.input} type="text" value={davUser} onChange={e => setDavUser(e.target.value)}
+                  placeholder="olaf  (leer = gleich wie Benutzername)" />
+                <label style={s.label}>Passwort</label>
+                <input style={s.input} type="password" value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••" required />
+                <label style={s.label}>Verzeichnis</label>
+                <input style={s.input} type="text" value={dir} onChange={e => setDir(e.target.value)}
+                  placeholder="/Eigene/Persönlich" required />
+                <label style={s.label}>AES-Key (nur bei Verschlüsselung)</label>
+                <input style={s.input} type="text" value={encKey} onChange={e => setEncKey(e.target.value)}
+                  placeholder="64-stelliger Hex-String" autoComplete="off" />
+                {!driveEmail && error && <p style={s.error}>{error}</p>}
+                <button type="submit" style={s.button}>Verbinden</button>
+                {saved?.davUser && <button type="button" style={s.linkBtn} onClick={() => setShowFull(false)}>Zurück</button>}
+              </form>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -214,8 +248,13 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
 const s: Record<string, React.CSSProperties> = {
   container: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', padding: 16 },
-  card: { background: 'var(--surface)', borderRadius: 12, padding: 32, width: '100%', maxWidth: 420, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' },
-  title: { color: 'var(--accent)', margin: '0 0 20px', fontSize: 28, fontWeight: 700, textAlign: 'center' },
+  card: { background: 'var(--surface)', borderRadius: 12, padding: 32, width: '100%', maxWidth: 400, boxShadow: '0 8px 32px rgba(0,0,0,0.3)' },
+  title: { color: 'var(--accent)', margin: '0 0 24px', fontSize: 28, fontWeight: 700, textAlign: 'center' },
+  qrBtnLarge: {
+    width: '100%', background: 'var(--accent)', color: '#0F1B2D', border: 'none',
+    borderRadius: 12, padding: '20px 16px', cursor: 'pointer',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 12,
+  },
   driveSection: { display: 'flex', flexDirection: 'column', gap: 4 },
   driveStatus: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 4 },
   driveBtn: { width: '100%', background: '#4285F4', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 0', fontSize: 15, fontWeight: 700, cursor: 'pointer' },
@@ -227,8 +266,7 @@ const s: Record<string, React.CSSProperties> = {
   input: { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', color: 'var(--text)', fontSize: 15, outline: 'none', width: '100%', boxSizing: 'border-box' },
   error: { color: 'var(--error)', fontSize: 13, margin: '8px 0' },
   button: { marginTop: 12, background: 'var(--accent)', color: '#0F1B2D', border: 'none', borderRadius: 8, padding: '13px 0', fontSize: 16, fontWeight: 700, cursor: 'pointer', width: '100%' },
-  linkBtn: { marginTop: 8, background: 'none', border: 'none', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', textDecoration: 'underline', width: '100%' },
-  qrBtn: { width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '11px 0', fontSize: 15, fontWeight: 600, cursor: 'pointer', color: 'var(--text)', marginBottom: 16 },
+  linkBtn: { marginTop: 8, background: 'none', border: 'none', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', textDecoration: 'underline', width: '100%', textAlign: 'center' },
   scanOverlay: { position: 'fixed', inset: 0, background: '#000', zIndex: 100, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' },
   scanVideoWrap: { position: 'relative', width: '100%', maxWidth: 480 },
   scanVideo: { width: '100%', display: 'block', borderRadius: 8 },
