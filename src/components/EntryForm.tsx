@@ -83,6 +83,27 @@ export default function EntryForm({ entry, categories, tags, qualifiers, saving,
     })
   }
 
+  const INDULGENCE_CHIPS = [
+    { emoji: '🍺', name: 'alkohol' },
+    { emoji: '🍫', name: 'süßes' },
+    { emoji: '🚬', name: 'tabak' },
+    { emoji: '🌿', name: 'cannabis' },
+  ] as const
+
+  function currentTagNames(): string[] {
+    return tagInput.split(',').map(s => s.trim()).filter(Boolean)
+  }
+
+  function toggleIndulgence(name: string) {
+    const names = currentTagNames()
+    if (names.includes(name)) {
+      setTagInput(names.filter(n => n !== name).join(', '))
+    } else {
+      setTagInput([...names, name].join(', '))
+    }
+    setTagSuggestions([])
+  }
+
   function handleTagInput(val: string) {
     setTagInput(val)
     const last = val.split(',').pop()?.trim() ?? ''
@@ -173,6 +194,20 @@ export default function EntryForm({ entry, categories, tags, qualifiers, saving,
                 ))}
               </div>
             )}
+          </div>
+
+          <label style={styles.label}>Genussmittel</label>
+          <div style={styles.chips}>
+            {INDULGENCE_CHIPS.map(({ emoji, name }) => {
+              const active = currentTagNames().includes(name)
+              return (
+                <button key={name} type="button"
+                  style={{ ...styles.chip, background: active ? '#C9A84C33' : 'transparent', borderColor: active ? 'var(--accent)' : 'var(--border)', color: active ? 'var(--accent)' : 'var(--text2)' }}
+                  onClick={() => toggleIndulgence(name)}>
+                  {emoji} #{name}
+                </button>
+              )
+            })}
           </div>
 
           {onDelete && !showDeleteConfirm && (
