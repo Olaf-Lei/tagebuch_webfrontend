@@ -25,7 +25,7 @@ function getDb(): Database {
   return db
 }
 
-function now() { return Math.floor(Date.now() / 1000) }
+function now() { return Date.now() }
 
 export function getEntries(search = '', categoryIds: number[] = [], tagIds: number[] = []): Entry[] {
   const d = getDb()

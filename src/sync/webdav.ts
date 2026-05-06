@@ -54,6 +54,7 @@ export async function uploadEncrypted(config: WebDAVConfig, text: string): Promi
 
 export async function uploadPlain(config: WebDAVConfig, data: Uint8Array): Promise<void> {
   const url = buildUrl(config, 'tagebuch.db')
-  const res = await proxyPut(url, config, data.buffer as ArrayBuffer, 'application/octet-stream')
+  const buf = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  const res = await proxyPut(url, config, buf, 'application/octet-stream')
   if (!res.ok) throw new Error(`Upload fehlgeschlagen: HTTP ${res.status}`)
 }
