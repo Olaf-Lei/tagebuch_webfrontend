@@ -50,6 +50,10 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
   const [cameraIdx, setCameraIdx] = useState(0)
 
+  const [relayInput, setRelayInput] = useState('')
+  const [relayLoading, setRelayLoading] = useState(false)
+  const [relayError, setRelayError] = useState('')
+
   const [showFull, setShowFull] = useState(!saved?.davUser)
   const [url, setUrl] = useState(saved?.url ?? '')
   const [username, setUsername] = useState(saved?.username ?? '')
@@ -146,6 +150,36 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
     }
   }, [scanning, cameraIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function handleRelayConnect() {
+    const code = relayInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (code.length !== 6) { setRelayError('Bitte genau 6 Zeichen eingeben.'); return }
+    setRelayError(''); setRelayLoading(true)
+    try {
+      const res = await fetch(`./proxy.php?action=fetch_code&code=${code}`)
+      const json = await res.json()
+      if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const payload = json as { v: number; nc?: { url: string; user: string; pass: string; path: string }; encKey?: string }
+      if (payload.v !== 1) throw new Error('Ungültiges Format.')
+      if (payload.encKey) localStorage.setItem('gdrive_enc_key', payload.encKey)
+      if (payload.nc) {
+        const config: WebDAVConfig = {
+          url: payload.nc.url, username: payload.nc.user,
+          davUser: '', password: payload.nc.pass, dir: payload.nc.path,
+          encKey: payload.encKey?.trim().toLowerCase() || undefined,
+        }
+        localStorage.setItem('tagebuch_webdav_config', JSON.stringify(config))
+        onConnect(config)
+        return
+      }
+      if (payload.encKey && driveEmail) { onConnectDrive(payload.encKey); return }
+      setRelayError('Code erkannt, aber keine Verbindungsdaten gefunden.')
+    } catch (e) {
+      setRelayError(String(e).replace('Error: ', ''))
+    } finally {
+      setRelayLoading(false)
+    }
+  }
+
   function startScan() {
     setScanError('')
     setScanning(true)
@@ -215,6 +249,21 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
             </button>
             {scanError && <p style={s.error}>{scanError}</p>}
             {error && <p style={s.error}>{error}</p>}
+            <div style={s.divider}><span style={s.dividerLabel}>oder Code eingeben</span></div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                style={{ ...s.input, flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase' }}
+                placeholder="A3F7KQ"
+                maxLength={6}
+                value={relayInput}
+                onChange={e => { setRelayInput(e.target.value.toUpperCase()); setRelayError('') }}
+                onKeyDown={e => e.key === 'Enter' && handleRelayConnect()}
+              />
+              <button style={{ ...s.button, marginTop: 0, padding: '0 18px', minWidth: 80 }} onClick={handleRelayConnect} disabled={relayLoading}>
+                {relayLoading ? '…' : '→'}
+              </button>
+            </div>
+            {relayError && <p style={s.error}>{relayError}</p>}
             <button style={s.linkBtn} onClick={() => setView('manual')}>Manueller Login →</button>
           </>
         ) : (

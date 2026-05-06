@@ -9,6 +9,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 $action = $_GET['action'] ?? '';
+
+if ($action === 'store_code') {
+    header('Content-Type: application/json');
+    $payload = json_decode(file_get_contents('php://input'), true);
+    if (!$payload) { http_response_code(400); echo json_encode(['error' => 'Ungültiger Body']); exit; }
+    $tmp = sys_get_temp_dir();
+    foreach (glob($tmp . '/tgb_relay_*.json') ?: [] as $f) {
+        if (filemtime($f) < time() - 300) @unlink($f);
+    }
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    $code = '';
+    for ($i = 0; $i < 6; $i++) $code .= $chars[random_int(0, strlen($chars) - 1)];
+    file_put_contents($tmp . '/tgb_relay_' . $code . '.json', json_encode(['ts' => time(), 'p' => $payload]));
+    echo json_encode(['code' => $code]);
+    exit;
+}
+
+if ($action === 'fetch_code') {
+    header('Content-Type: application/json');
+    $code = strtoupper(preg_replace('/[^A-Z0-9]/i', '', $_GET['code'] ?? ''));
+    if (strlen($code) !== 6) { http_response_code(400); echo json_encode(['error' => 'Ungültiger Code']); exit; }
+    $file = sys_get_temp_dir() . '/tgb_relay_' . $code . '.json';
+    if (!file_exists($file)) { http_response_code(404); echo json_encode(['error' => 'Code nicht gefunden oder abgelaufen.']); exit; }
+    $content = json_decode(file_get_contents($file), true);
+    @unlink($file);
+    if (!$content || ($content['ts'] ?? 0) < time() - 300) {
+        http_response_code(404); echo json_encode(['error' => 'Code abgelaufen.']); exit;
+    }
+    echo json_encode($content['p']);
+    exit;
+}
+
 if ($action === 'google_token' || $action === 'google_refresh') {
     header('Content-Type: application/json');
     $clientId     = 'YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com';
