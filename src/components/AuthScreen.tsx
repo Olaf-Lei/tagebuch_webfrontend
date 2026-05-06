@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { BrowserMultiFormatReader } from '@zxing/browser'
+import { BrowserQRCodeReader } from '@zxing/browser'
+import { DecodeHintType } from '@zxing/library'
 import type { WebDAVConfig } from '../types'
 
 interface Props {
@@ -35,9 +36,11 @@ interface QRPayload {
 
 type View = 'main' | 'manual'
 
-function isBackCamera(d: MediaDeviceInfo) {
-  return /back|rear|environment/i.test(d.label)
-}
+const QR_HINTS = new Map<DecodeHintType, unknown>([
+  [DecodeHintType.TRY_HARDER, true],
+])
+
+const QR_OPTIONS = { delayBetweenScanAttempts: 0, delayBetweenScanSuccess: 200 }
 
 export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, driveEmail, error }: Props) {
   const saved = loadSavedConfig()
@@ -69,34 +72,27 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
   useEffect(() => { return stopScan }, [stopScan])
 
-  // Kameraliste laden sobald Scan startet
+  // Scanner-Effect: startet neu bei Kamerawechsel (cameraIdx)
+  // Kameraliste wird NACH Permission-Grant befüllt (dann haben deviceId/label echte Werte)
   useEffect(() => {
-    if (!scanning) return
-    navigator.mediaDevices.enumerateDevices()
-      .then(devices => {
-        const cams = devices.filter(d => d.kind === 'videoinput')
-        setCameras(cams)
-        const envIdx = cams.findIndex(isBackCamera)
-        setCameraIdx(envIdx >= 0 ? envIdx : 0)
-      })
-      .catch(() => setCameras([]))
-  }, [scanning])
-
-  // Scanner starten/neustarten bei Kamerawechsel
-  useEffect(() => {
-    if (!scanning || cameras.length === 0 || !videoRef.current) return
-
-    const cam = cameras[cameraIdx]
-    const mirror = !isBackCamera(cam)
-    videoRef.current.style.transform = mirror ? 'scaleX(-1)' : 'none'
+    if (!scanning || !videoRef.current) return
 
     let stopped = false
     let localControls: { stop: () => void } | null = null
-    const reader = new BrowserMultiFormatReader()
+
+    // Beim ersten Start (cameras noch leer): undefined → ZXing wählt Standardkamera
+    // Nach Switch: echter deviceId aus der post-permission Enumeration
+    const deviceId = cameras[cameraIdx]?.deviceId || undefined
+    const isFront = cameras[cameraIdx]
+      ? !/back|rear|environment/i.test(cameras[cameraIdx].label)
+      : false
+    videoRef.current.style.transform = isFront ? 'scaleX(-1)' : 'none'
+
+    const reader = new BrowserQRCodeReader(QR_HINTS, QR_OPTIONS)
 
     ;(async () => {
       try {
-        localControls = await reader.decodeFromVideoDevice(cam.deviceId, videoRef.current!, (result) => {
+        localControls = await reader.decodeFromVideoDevice(deviceId, videoRef.current!, (result) => {
           if (!result || stopped) return
           try {
             const payload: QRPayload = JSON.parse(result.getText())
@@ -126,10 +122,17 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
         if (stopped) { localControls.stop(); return }
         controlsRef.current = localControls
+
+        // Jetzt Permission erteilt → Kameras mit echten Labels/IDs abrufen
+        if (cameras.length === 0 && !stopped) {
+          const devs = await navigator.mediaDevices.enumerateDevices()
+          const cams = devs.filter(d => d.kind === 'videoinput' && d.deviceId)
+          if (cams.length > 1) setCameras(cams)
+        }
       } catch (e) {
         if (!stopped) {
           const msg = String(e).toLowerCase()
-          setScanError(msg.includes('permission') || msg.includes('denied')
+          setScanError(msg.includes('permission') || msg.includes('denied') || msg.includes('notallowed')
             ? 'Kamera-Zugriff verweigert.' : 'Kamera konnte nicht gestartet werden.')
           setScanning(false)
         }
@@ -141,7 +144,7 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
       localControls?.stop()
       controlsRef.current = null
     }
-  }, [scanning, cameras, cameraIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scanning, cameraIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function startScan() {
     setScanError('')
@@ -149,6 +152,7 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
   }
 
   function switchCamera() {
+    if (cameras.length < 2) return
     setCameraIdx(i => (i + 1) % cameras.length)
   }
 
@@ -175,7 +179,8 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
     onConnectDrive(key)
   }
 
-  const cameraLabel = cameras[cameraIdx]?.label || `Kamera ${cameraIdx + 1}`
+  const currentCamLabel = cameras[cameraIdx]?.label || ''
+  const shortLabel = currentCamLabel.length > 24 ? currentCamLabel.slice(0, 24) + '…' : currentCamLabel
 
   return (
     <div style={s.container}>
@@ -188,8 +193,8 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
           <div style={s.scanControls}>
             <p style={s.scanHint}>QR-Code aus der Android-App scannen</p>
             {cameras.length > 1 && (
-              <button style={s.switchBtn} onClick={switchCamera} title="Kamera wechseln">
-                🔄 {cameraLabel.length > 24 ? cameraLabel.slice(0, 24) + '…' : cameraLabel}
+              <button style={s.switchBtn} onClick={switchCamera}>
+                🔄 {shortLabel || `Kamera ${cameraIdx + 1} / ${cameras.length}`}
               </button>
             )}
           </div>
