@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import jsQR from 'jsqr'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { BrowserMultiFormatReader } from '@zxing/browser'
 import type { WebDAVConfig } from '../types'
 
 interface Props {
@@ -40,8 +40,8 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
   const [view, setView] = useState<View>('main')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
+  const [shouldMirror, setShouldMirror] = useState(false)
 
-  // Manual form state
   const [showFull, setShowFull] = useState(!saved?.davUser)
   const [url, setUrl] = useState(saved?.url ?? '')
   const [username, setUsername] = useState(saved?.username ?? '')
@@ -52,77 +52,84 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
   const [driveEncKey, setDriveEncKey] = useState(localStorage.getItem('gdrive_enc_key') ?? '')
 
   const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const rafRef = useRef<number>(0)
+  const controlsRef = useRef<{ stop: () => void } | null>(null)
 
   const stopScan = useCallback(() => {
-    cancelAnimationFrame(rafRef.current)
-    streamRef.current?.getTracks().forEach(t => t.stop())
-    streamRef.current = null
+    controlsRef.current?.stop()
+    controlsRef.current = null
     setScanning(false)
   }, [])
 
   useEffect(() => { return stopScan }, [stopScan])
 
-  async function startScan() {
+  useEffect(() => {
+    if (!scanning) return
+
+    let stopped = false
+    let localControls: { stop: () => void } | null = null
+    const reader = new BrowserMultiFormatReader()
+
+    ;(async () => {
+      try {
+        let deviceId: string | undefined
+        try {
+          const devices = (await navigator.mediaDevices.enumerateDevices())
+            .filter(d => d.kind === 'videoinput')
+          const env = devices.find(d => /back|rear|environment/i.test(d.label))
+          setShouldMirror(!env)
+          deviceId = env?.deviceId ?? devices[0]?.deviceId
+        } catch { setShouldMirror(true) }
+
+        if (stopped || !videoRef.current) return
+
+        localControls = await reader.decodeFromVideoDevice(deviceId, videoRef.current, (result) => {
+          if (!result || stopped) return
+          try {
+            const payload: QRPayload = JSON.parse(result.getText())
+            if (payload.v === 1) {
+              stopped = true
+              localControls?.stop()
+              controlsRef.current = null
+              setScanning(false)
+              if (payload.encKey) localStorage.setItem('gdrive_enc_key', payload.encKey)
+              if (payload.nc) {
+                const config: WebDAVConfig = {
+                  url: payload.nc.url, username: payload.nc.user,
+                  davUser: '', password: payload.nc.pass, dir: payload.nc.path,
+                  encKey: payload.encKey?.trim().toLowerCase() || undefined,
+                }
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
+                onConnect(config)
+                return
+              }
+              if (payload.encKey && driveEmail) { onConnectDrive(payload.encKey); return }
+              setScanError('QR-Code erkannt — keine Verbindungsdaten gefunden.')
+            }
+          } catch { /* kein gültiger Payload */ }
+        })
+
+        if (stopped) { localControls.stop(); return }
+        controlsRef.current = localControls
+      } catch (e) {
+        if (!stopped) {
+          const msg = String(e).toLowerCase()
+          setScanError(msg.includes('permission') || msg.includes('denied')
+            ? 'Kamera-Zugriff verweigert.' : 'Kamera konnte nicht gestartet werden.')
+          setScanning(false)
+        }
+      }
+    })()
+
+    return () => {
+      stopped = true
+      localControls?.stop()
+      controlsRef.current = null
+    }
+  }, [scanning]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function startScan() {
     setScanError('')
     setScanning(true)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.play()
-      }
-      tick()
-    } catch {
-      setScanError('Kamera-Zugriff verweigert.')
-      setScanning(false)
-    }
-  }
-
-  function tick() {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas || video.readyState < 2) { rafRef.current = requestAnimationFrame(tick); return }
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')!
-    ctx.drawImage(video, 0, 0)
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    const result = jsQR(img.data, img.width, img.height)
-    if (result) {
-      try {
-        const payload: QRPayload = JSON.parse(result.data)
-        if (payload.v === 1) {
-          stopScan()
-          if (payload.encKey) {
-            localStorage.setItem('gdrive_enc_key', payload.encKey)
-          }
-          if (payload.nc) {
-            const config: WebDAVConfig = {
-              url: payload.nc.url,
-              username: payload.nc.user,
-              davUser: '',
-              password: payload.nc.pass,
-              dir: payload.nc.path,
-              encKey: payload.encKey?.trim().toLowerCase() || undefined,
-            }
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
-            onConnect(config)
-            return
-          }
-          if (payload.encKey && driveEmail) {
-            onConnectDrive(payload.encKey)
-            return
-          }
-          setScanError('QR-Code erkannt — keine Verbindungsdaten gefunden.')
-          return
-        }
-      } catch { /* kein gültiger Payload */ }
-    }
-    rafRef.current = requestAnimationFrame(tick)
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -150,14 +157,17 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
   return (
     <div style={s.container}>
-      {/* Kamera-Overlay */}
       {scanning && (
         <div style={s.scanOverlay}>
           <div style={s.scanVideoWrap}>
-            <video ref={videoRef} style={s.scanVideo} playsInline muted />
+            <video
+              ref={videoRef}
+              style={{ ...s.scanVideo, transform: shouldMirror ? 'scaleX(-1)' : 'none' }}
+              playsInline
+              muted
+            />
             <div style={s.scanFrame} />
           </div>
-          <canvas ref={canvasRef} style={{ display: 'none' }} />
           <p style={s.scanHint}>QR-Code aus der Android-App scannen</p>
           {scanError && <p style={s.scanErr}>{scanError}</p>}
           <button style={s.scanClose} onClick={stopScan}>✕ Abbrechen</button>
@@ -168,7 +178,6 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
         <h1 style={s.title}>📔 Tagebuch</h1>
 
         {view === 'main' ? (
-          /* ── Haupt-Ansicht: QR-Code ── */
           <>
             <button style={s.qrBtnLarge} onClick={startScan}>
               <span style={{ fontSize: 40, lineHeight: 1 }}>📷</span>
@@ -180,13 +189,11 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
             <button style={s.linkBtn} onClick={() => setView('manual')}>Manueller Login →</button>
           </>
         ) : (
-          /* ── Manueller Login ── */
           <>
             <button style={{ ...s.linkBtn, marginBottom: 20, textAlign: 'left' as const }} onClick={() => setView('main')}>
               ← Zurück
             </button>
 
-            {/* Google Drive */}
             {driveEmail ? (
               <div style={s.driveSection}>
                 <div style={s.driveStatus}>
@@ -206,7 +213,6 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
             <div style={s.divider}><span style={s.dividerLabel}>oder Nextcloud</span></div>
 
-            {/* Nextcloud */}
             {saved?.davUser && !showFull ? (
               <>
                 <p style={s.savedInfo}>{saved.username} · {saved.url.replace(/https?:\/\//, '')}</p>
