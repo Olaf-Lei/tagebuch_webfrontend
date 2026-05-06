@@ -35,12 +35,17 @@ interface QRPayload {
 
 type View = 'main' | 'manual'
 
+function isBackCamera(d: MediaDeviceInfo) {
+  return /back|rear|environment/i.test(d.label)
+}
+
 export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, driveEmail, error }: Props) {
   const saved = loadSavedConfig()
   const [view, setView] = useState<View>('main')
   const [scanning, setScanning] = useState(false)
   const [scanError, setScanError] = useState('')
-  const [shouldMirror, setShouldMirror] = useState(false)
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([])
+  const [cameraIdx, setCameraIdx] = useState(0)
 
   const [showFull, setShowFull] = useState(!saved?.davUser)
   const [url, setUrl] = useState(saved?.url ?? '')
@@ -58,12 +63,32 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
     controlsRef.current?.stop()
     controlsRef.current = null
     setScanning(false)
+    setCameras([])
+    setCameraIdx(0)
   }, [])
 
   useEffect(() => { return stopScan }, [stopScan])
 
+  // Kameraliste laden sobald Scan startet
   useEffect(() => {
     if (!scanning) return
+    navigator.mediaDevices.enumerateDevices()
+      .then(devices => {
+        const cams = devices.filter(d => d.kind === 'videoinput')
+        setCameras(cams)
+        const envIdx = cams.findIndex(isBackCamera)
+        setCameraIdx(envIdx >= 0 ? envIdx : 0)
+      })
+      .catch(() => setCameras([]))
+  }, [scanning])
+
+  // Scanner starten/neustarten bei Kamerawechsel
+  useEffect(() => {
+    if (!scanning || cameras.length === 0 || !videoRef.current) return
+
+    const cam = cameras[cameraIdx]
+    const mirror = !isBackCamera(cam)
+    videoRef.current.style.transform = mirror ? 'scaleX(-1)' : 'none'
 
     let stopped = false
     let localControls: { stop: () => void } | null = null
@@ -71,18 +96,7 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
 
     ;(async () => {
       try {
-        let deviceId: string | undefined
-        try {
-          const devices = (await navigator.mediaDevices.enumerateDevices())
-            .filter(d => d.kind === 'videoinput')
-          const env = devices.find(d => /back|rear|environment/i.test(d.label))
-          setShouldMirror(!env)
-          deviceId = env?.deviceId ?? devices[0]?.deviceId
-        } catch { setShouldMirror(true) }
-
-        if (stopped || !videoRef.current) return
-
-        localControls = await reader.decodeFromVideoDevice(deviceId, videoRef.current, (result) => {
+        localControls = await reader.decodeFromVideoDevice(cam.deviceId, videoRef.current!, (result) => {
           if (!result || stopped) return
           try {
             const payload: QRPayload = JSON.parse(result.getText())
@@ -91,6 +105,8 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
               localControls?.stop()
               controlsRef.current = null
               setScanning(false)
+              setCameras([])
+              setCameraIdx(0)
               if (payload.encKey) localStorage.setItem('gdrive_enc_key', payload.encKey)
               if (payload.nc) {
                 const config: WebDAVConfig = {
@@ -125,11 +141,15 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
       localControls?.stop()
       controlsRef.current = null
     }
-  }, [scanning]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scanning, cameras, cameraIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function startScan() {
     setScanError('')
     setScanning(true)
+  }
+
+  function switchCamera() {
+    setCameraIdx(i => (i + 1) % cameras.length)
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -155,20 +175,24 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
     onConnectDrive(key)
   }
 
+  const cameraLabel = cameras[cameraIdx]?.label || `Kamera ${cameraIdx + 1}`
+
   return (
     <div style={s.container}>
       {scanning && (
         <div style={s.scanOverlay}>
           <div style={s.scanVideoWrap}>
-            <video
-              ref={videoRef}
-              style={{ ...s.scanVideo, transform: shouldMirror ? 'scaleX(-1)' : 'none' }}
-              playsInline
-              muted
-            />
+            <video ref={videoRef} style={s.scanVideo} playsInline muted />
             <div style={s.scanFrame} />
           </div>
-          <p style={s.scanHint}>QR-Code aus der Android-App scannen</p>
+          <div style={s.scanControls}>
+            <p style={s.scanHint}>QR-Code aus der Android-App scannen</p>
+            {cameras.length > 1 && (
+              <button style={s.switchBtn} onClick={switchCamera} title="Kamera wechseln">
+                🔄 {cameraLabel.length > 24 ? cameraLabel.slice(0, 24) + '…' : cameraLabel}
+              </button>
+            )}
+          </div>
           {scanError && <p style={s.scanErr}>{scanError}</p>}
           <button style={s.scanClose} onClick={stopScan}>✕ Abbrechen</button>
         </div>
@@ -277,7 +301,9 @@ const s: Record<string, React.CSSProperties> = {
   scanVideoWrap: { position: 'relative', width: '100%', maxWidth: 480 },
   scanVideo: { width: '100%', display: 'block', borderRadius: 8 },
   scanFrame: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 220, height: 220, border: '3px solid #C9A84C', borderRadius: 16, pointerEvents: 'none' },
-  scanHint: { color: '#fff', marginTop: 20, fontSize: 14, textAlign: 'center', padding: '0 24px' },
+  scanControls: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginTop: 16 },
+  scanHint: { color: '#fff', fontSize: 14, textAlign: 'center', padding: '0 24px', margin: 0 },
+  switchBtn: { background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: 20, color: '#fff', padding: '6px 16px', fontSize: 13, cursor: 'pointer' },
   scanErr: { color: '#ff6b6b', fontSize: 13, marginTop: 8 },
   scanClose: { marginTop: 24, background: 'none', border: '1px solid #555', borderRadius: 8, color: '#fff', padding: '10px 28px', fontSize: 15, cursor: 'pointer' },
 }
