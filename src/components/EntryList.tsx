@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import type { Category, Tag, Qualifier } from '../types'
 import { getEntries, getEntry, exportJSON, exportCSV, exportMarkdown } from '../db/database'
 import EntryCard from './EntryCard'
@@ -65,6 +65,11 @@ export default function EntryList({ categories, tags, qualifiers, onSave, onDele
   const [menuOpen, setMenuOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [syncOpen, setSyncOpen] = useState(false)
+  const [relayOpen, setRelayOpen] = useState(false)
+  const [relayInput, setRelayInput] = useState('')
+  const [relayLoading, setRelayLoading] = useState(false)
+  const [relayError, setRelayError] = useState('')
+  const [relayCountdown, setRelayCountdown] = useState(0)
 
   const entries = useMemo(() => getEntries(search, filterCats, filterTags), [search, filterCats, filterTags, refresh])
   const entryDetails = useMemo(() => entries.map(e => getEntry(e.id)!), [entries])
@@ -87,6 +92,41 @@ export default function EntryList({ categories, tags, qualifiers, onSave, onDele
     await onDelete(id)
     setFormMode(null)
     setRefresh(r => r + 1)
+  }
+
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => () => { if (countdownRef.current) clearInterval(countdownRef.current) }, [])
+
+  async function handleRelayConnect() {
+    const code = relayInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (code.length !== 6) { setRelayError('Bitte genau 6 Zeichen eingeben.'); return }
+    setRelayError(''); setRelayLoading(true)
+    try {
+      const res = await fetch(`./proxy.php?action=fetch_code&code=${code}`)
+      const json = await res.json()
+      if (res.status === 429) {
+        const wait = json.retry_after ?? 30
+        setRelayCountdown(wait)
+        if (countdownRef.current) clearInterval(countdownRef.current)
+        countdownRef.current = setInterval(() => {
+          setRelayCountdown(n => { if (n <= 1) { clearInterval(countdownRef.current!); return 0 } return n - 1 })
+        }, 1000)
+        setRelayError(`Zu viele Versuche. Bitte ${wait} s warten.`)
+        return
+      }
+      if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`)
+      if (json.encKey) localStorage.setItem('gdrive_enc_key', json.encKey)
+      if (json.nc) {
+        const config = { url: json.nc.url, username: json.nc.user, davUser: '', password: json.nc.pass, dir: json.nc.path, encKey: json.encKey?.trim().toLowerCase() || undefined }
+        localStorage.setItem('tagebuch_webdav_config', JSON.stringify(config))
+      }
+      window.location.reload()
+    } catch (e) {
+      setRelayError(String(e).replace('Error: ', ''))
+    } finally {
+      setRelayLoading(false)
+    }
   }
 
   const editEntry = formMode?.mode === 'edit' ? getEntry(formMode.entryId) ?? undefined : undefined
@@ -123,6 +163,10 @@ export default function EntryList({ categories, tags, qualifiers, onSave, onDele
                     <button style={s.submenuItem} onClick={() => { exportMarkdown(); setMenuOpen(false) }}>Einträge Markdown</button>
                   </div>
                 )}
+                <div style={s.menuDivider} />
+                <button style={s.menuItem} onClick={() => { setRelayOpen(true); setRelayInput(''); setRelayError(''); setMenuOpen(false) }}>
+                  📱 Einmalcode eingeben
+                </button>
                 <div style={s.menuDivider} />
                 <button style={{ ...s.menuItem, color: 'var(--error)' }} onClick={() => { onLogout(); setMenuOpen(false) }}>
                   Abmelden
@@ -224,6 +268,38 @@ export default function EntryList({ categories, tags, qualifiers, onSave, onDele
               </div>
             )}
             <button style={sm.closeBtn} onClick={() => setSyncOpen(false)}>Schließen</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Relay-Code-Modal ── */}
+      {relayOpen && (
+        <div style={sm.overlay} onClick={() => setRelayOpen(false)}>
+          <div style={sm.box} onClick={e => e.stopPropagation()}>
+            <h3 style={sm.title}>📱 Einmalcode eingeben</h3>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text2)' }}>
+              Code aus der Android-App: Einstellungen → Experten → Web-Tagebuch → Einmalcode erzeugen
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 18, letterSpacing: 4, textTransform: 'uppercase', fontWeight: 700 }}
+                maxLength={6}
+                value={relayInput}
+                placeholder="XXXXXX"
+                onChange={e => { setRelayInput(e.target.value.toUpperCase()); setRelayError('') }}
+                onKeyDown={e => e.key === 'Enter' && !relayLoading && relayCountdown === 0 && handleRelayConnect()}
+                autoFocus
+              />
+              <button
+                style={{ ...sm.syncBtn, width: 'auto', padding: '0 20px', opacity: (relayLoading || relayCountdown > 0) ? 0.6 : 1 }}
+                onClick={handleRelayConnect}
+                disabled={relayLoading || relayCountdown > 0}
+              >
+                {relayLoading ? '…' : relayCountdown > 0 ? `${relayCountdown}s` : '→'}
+              </button>
+            </div>
+            {relayError && <div style={sm.error}>{relayError}</div>}
+            <button style={sm.closeBtn} onClick={() => setRelayOpen(false)}>Abbrechen</button>
           </div>
         </div>
       )}

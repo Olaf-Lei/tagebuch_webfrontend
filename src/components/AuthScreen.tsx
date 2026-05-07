@@ -53,6 +53,8 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
   const [relayInput, setRelayInput] = useState('')
   const [relayLoading, setRelayLoading] = useState(false)
   const [relayError, setRelayError] = useState('')
+  const [relayCountdown, setRelayCountdown] = useState(0)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [showFull, setShowFull] = useState(!saved?.davUser)
   const [url, setUrl] = useState(saved?.url ?? '')
@@ -157,6 +159,16 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
     try {
       const res = await fetch(`./proxy.php?action=fetch_code&code=${code}`)
       const json = await res.json()
+      if (res.status === 429) {
+        const wait = json.retry_after ?? 30
+        setRelayCountdown(wait)
+        if (countdownRef.current) clearInterval(countdownRef.current)
+        countdownRef.current = setInterval(() => {
+          setRelayCountdown(n => { if (n <= 1) { clearInterval(countdownRef.current!); return 0 } return n - 1 })
+        }, 1000)
+        setRelayError(`Zu viele Versuche. Bitte ${wait} s warten.`)
+        return
+      }
       if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`)
       const payload = json as { v: number; nc?: { url: string; user: string; pass: string; path: string }; encKey?: string }
       if (payload.v !== 1) throw new Error('Ungültiges Format.')
@@ -257,10 +269,10 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
                 maxLength={6}
                 value={relayInput}
                 onChange={e => { setRelayInput(e.target.value.toUpperCase()); setRelayError('') }}
-                onKeyDown={e => e.key === 'Enter' && handleRelayConnect()}
+                onKeyDown={e => e.key === 'Enter' && !relayLoading && relayCountdown === 0 && handleRelayConnect()}
               />
-              <button style={{ ...s.button, marginTop: 0, padding: '0 18px', minWidth: 80, width: 'auto', flexShrink: 0 }} onClick={handleRelayConnect} disabled={relayLoading}>
-                {relayLoading ? '…' : '→'}
+              <button style={{ ...s.button, marginTop: 0, padding: '0 18px', minWidth: 80, width: 'auto', flexShrink: 0 }} onClick={handleRelayConnect} disabled={relayLoading || relayCountdown > 0}>
+                {relayLoading ? '…' : relayCountdown > 0 ? `${relayCountdown}s` : '→'}
               </button>
             </div>
             {relayError && <p style={s.error}>{relayError}</p>}
