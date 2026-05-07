@@ -259,7 +259,7 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
                 onChange={e => { setRelayInput(e.target.value.toUpperCase()); setRelayError('') }}
                 onKeyDown={e => e.key === 'Enter' && handleRelayConnect()}
               />
-              <button style={{ ...s.button, marginTop: 0, padding: '0 18px', minWidth: 80 }} onClick={handleRelayConnect} disabled={relayLoading}>
+              <button style={{ ...s.button, marginTop: 0, padding: '0 18px', minWidth: 80, width: 'auto', flexShrink: 0 }} onClick={handleRelayConnect} disabled={relayLoading}>
                 {relayLoading ? '…' : '→'}
               </button>
             </div>
