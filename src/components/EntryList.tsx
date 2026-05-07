@@ -285,7 +285,7 @@ export default function EntryList({ categories, tags, qualifiers, onSave, onDele
                 style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 18, letterSpacing: 4, textTransform: 'uppercase', fontWeight: 700 }}
                 maxLength={6}
                 value={relayInput}
-                placeholder="XXXXXX"
+                placeholder="Code"
                 onChange={e => { setRelayInput(e.target.value.toUpperCase()); setRelayError('') }}
                 onKeyDown={e => e.key === 'Enter' && !relayLoading && relayCountdown === 0 && handleRelayConnect()}
                 autoFocus

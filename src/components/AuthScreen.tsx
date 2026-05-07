@@ -261,11 +261,11 @@ export default function AuthScreen({ onConnect, onGoogleAuth, onConnectDrive, dr
             </button>
             {scanError && <p style={s.error}>{scanError}</p>}
             {error && <p style={s.error}>{error}</p>}
-            <div style={s.divider}><span style={s.dividerLabel}>oder Code eingeben</span></div>
+            <div style={s.divider}><span style={s.dividerLabel}>oder 6-stelligen Code vom Smartphone eingeben</span></div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input
                 style={{ ...s.input, flex: 1, textAlign: 'center', fontSize: 20, fontWeight: 700, letterSpacing: 4, textTransform: 'uppercase' }}
-                placeholder="A3F7KQ"
+                placeholder="Code"
                 maxLength={6}
                 value={relayInput}
                 onChange={e => { setRelayInput(e.target.value.toUpperCase()); setRelayError('') }}
