@@ -94,4 +94,4 @@ Danach kann die App QR-Codes und 6-stellige Relay-Codes generieren, die automati
 
 ## Lizenz
 
-MIT
+GNU General Public License v3.0 – siehe [LICENSE](LICENSE)
