@@ -1,5 +1,4 @@
-const CLIENT_ID = 'YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com'
-const REDIRECT_URI = 'https://olovenet.de/tagebuch/'
+import { GDRIVE_CLIENT_ID as CLIENT_ID, GDRIVE_REDIRECT_URI as REDIRECT_URI } from './googledriveConfig'
 const SCOPE = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.email'
 
 const LS = {
