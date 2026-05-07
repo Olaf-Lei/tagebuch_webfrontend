@@ -1,3 +1,4 @@
 node_modules/
 dist/
 public/sql-wasm.wasm
+proxy.config.php

@@ -43,8 +43,9 @@ if ($action === 'fetch_code') {
 
 if ($action === 'google_token' || $action === 'google_refresh') {
     header('Content-Type: application/json');
-    $clientId     = 'YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com';
-    $clientSecret = 'YOUR_GOOGLE_CLIENT_SECRET';
+    require_once __DIR__ . '/proxy.config.php';
+    $clientId     = $googleClientId;
+    $clientSecret = $googleClientSecret;
     $input        = json_decode(file_get_contents('php://input'), true) ?? [];
     $params = $action === 'google_token'
         ? ['code'          => $input['code']          ?? '',
